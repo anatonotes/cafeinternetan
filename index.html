@@ -61,6 +61,120 @@
       { id: 'libro', name: 'Libro', price: 300, icon: "📖" }
     ];
 
+    // ─── Sound Engine ───────────────────────────────────────────────────────────
+    const createCtx = () => new (window.AudioContext || window.webkitAudioContext)();
+
+    // Play: bright double-beep (start focus session)
+    const playStartSound = () => {
+      try {
+        const ctx = createCtx();
+        [0, 0.12].forEach((delay, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.value = i === 0 ? 700 : 900;
+          gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+          gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + delay + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.18);
+          osc.start(ctx.currentTime + delay);
+          osc.stop(ctx.currentTime + delay + 0.18);
+        });
+      } catch(e) { console.warn("Audio:", e); }
+    };
+
+    // Pause: soft low descending tone
+    const playPauseSound = () => {
+      try {
+        const ctx = createCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(500, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.22);
+      } catch(e) { console.warn("Audio:", e); }
+    };
+
+    // Rest mode: soft dreamy chord
+    const playRestSound = () => {
+      try {
+        const ctx = createCtx();
+        [440, 554, 659].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.07);
+          gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + i * 0.07 + 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.07 + 0.6);
+          osc.start(ctx.currentTime + i * 0.07);
+          osc.stop(ctx.currentTime + i * 0.07 + 0.6);
+        });
+      } catch(e) { console.warn("Audio:", e); }
+    };
+
+    // Buy: coin jingle (high blip + shimmer)
+    const playBuySound = () => {
+      try {
+        const ctx = createCtx();
+        [1200, 1600, 1000].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = i === 2 ? 'triangle' : 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.06);
+          gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + i * 0.06 + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.06 + 0.15);
+          osc.start(ctx.currentTime + i * 0.06);
+          osc.stop(ctx.currentTime + i * 0.06 + 0.15);
+        });
+      } catch(e) { console.warn("Audio:", e); }
+    };
+
+    // Check: satisfying tick for pre-study / task add
+    const playCheckSound = () => {
+      try {
+        const ctx = createCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.06);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.1);
+      } catch(e) { console.warn("Audio:", e); }
+    };
+
+    // Reward: XP earned every minute — gentle ascending arpeggio
+    const playRewardSound = () => {
+      try {
+        const ctx = createCtx();
+        [523, 659, 784, 1047].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.08);
+          gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + i * 0.08 + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.08 + 0.18);
+          osc.start(ctx.currentTime + i * 0.08);
+          osc.stop(ctx.currentTime + i * 0.08 + 0.18);
+        });
+      } catch(e) { console.warn("Audio:", e); }
+    };
+    // ────────────────────────────────────────────────────────────────────────────
+
     const LucideIcon = ({ name, className = "" }) => {
       const icons = {
         play: <path d="m5 3 14 9-14 9V3z" />,
@@ -158,6 +272,7 @@
           setTimeLeft(t => {
             const nextTime = t - 1;
             if (!isRestMode && nextTime > 0 && nextTime % 60 === 0) {
+              playRewardSound();
               const newC = coins + REWARDS.COINS_PER_MINUTE;
               const newS = score + REWARDS.XP_PER_MINUTE;
               setCoins(newC);
@@ -185,6 +300,7 @@
 
       const handleBuy = (item) => {
         if (coins >= item.price && !itemsOwned[item.id]) {
+          playBuySound();
           const newCoins = coins - item.price;
           const newItems = { ...itemsOwned, [item.id]: true };
           setCoins(newCoins);
@@ -194,6 +310,7 @@
       };
 
       const togglePreStudy = (index) => {
+        playCheckSound();
         const nextPre = [...preStudy];
         nextPre[index] = !nextPre[index];
         setPreStudy(nextPre);
@@ -202,6 +319,7 @@
 
       const addTask = () => {
         if (!newTask.trim()) return;
+        playCheckSound();
         const nextTasks = [...tasks, newTask];
         setTasks(nextTasks);
         setNewTask("");
@@ -283,11 +401,11 @@
                   {formatTime(timeLeft)}
                 </div>
                 <div className="flex flex-col md:flex-row items-center justify-center gap-4">
-                  <button onClick={() => setIsPaused(!isPaused)} className={`w-full md:w-auto px-12 py-5 rounded-full text-sm font-bold hover:scale-105 active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 ${isRestMode ? 'bg-indigo-950 text-white' : 'bg-black text-white'}`}>
+                  <button onClick={() => { isPaused ? playStartSound() : playPauseSound(); setIsPaused(!isPaused); }} className={`w-full md:w-auto px-12 py-5 rounded-full text-sm font-bold hover:scale-105 active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 ${isRestMode ? 'bg-indigo-950 text-white' : 'bg-black text-white'}`}>
                     <LucideIcon name={isPaused ? "play" : "pause"} />
                     {isPaused ? 'INICIAR SESIÓN' : 'PAUSAR ENFOQUE'}
                   </button>
-                  <button onClick={() => { const nextMode = !isRestMode; setIsRestMode(nextMode); setTimeLeft(nextMode ? 10 * 60 : 90 * 60); setIsPaused(true); }} className={`w-full md:w-auto border text-black px-12 py-5 rounded-full text-sm font-bold transition-all shadow-lg flex items-center justify-center gap-3 ${isRestMode ? 'bg-indigo-100 border-indigo-200 hover:bg-indigo-200' : 'bg-white/80 border-black/10 hover:bg-white'}`}>
+                  <button onClick={() => { const nextMode = !isRestMode; playRestSound(); setIsRestMode(nextMode); setTimeLeft(nextMode ? 10 * 60 : 90 * 60); setIsPaused(true); }} className={`w-full md:w-auto border text-black px-12 py-5 rounded-full text-sm font-bold transition-all shadow-lg flex items-center justify-center gap-3 ${isRestMode ? 'bg-indigo-100 border-indigo-200 hover:bg-indigo-200' : 'bg-white/80 border-black/10 hover:bg-white'}`}>
                     <LucideIcon name={isRestMode ? "sun" : "moon"} />
                     {isRestMode ? 'VOLVER AL TRABAJO' : 'TOMAR UN DESCANSO'}
                   </button>
