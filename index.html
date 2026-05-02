@@ -23,7 +23,7 @@
   <div id="root"></div>
 
   <!-- ⚠️ PON AQUÍ TU CONFIGURACIÓN DE FIREBASE -->
-  <script>
+<script>
     const firebaseConfig = {
       apiKey:            "TU_API_KEY",
       authDomain:        "TU_PROJECT.firebaseapp.com",
@@ -37,7 +37,6 @@
     const db   = firebase.firestore();
     const appId = 'cafe-internet-pro';
   </script>
-
   <script type="text/babel">
     const { useState, useEffect, useCallback } = React;
 
@@ -94,7 +93,8 @@
       );
     };
 
-    function App() {
+   
+   function App() {
       const [user, setUser] = useState(null);
       const [username, setUsername] = useState("");
       const [isNameSet, setIsNameSet] = useState(false);
@@ -102,7 +102,6 @@
       const [isPaused, setIsPaused] = useState(true);
       const [isRestMode, setIsRestMode] = useState(false);
       
-      // Estados de persistencia
       const [coins, setCoins] = useState(0);
       const [score, setScore] = useState(0);
       const [tasks, setTasks] = useState([]);
@@ -111,14 +110,12 @@
       const [globalRankings, setGlobalRankings] = useState([]);
       const [newTask, setNewTask] = useState("");
 
-      // 1. Inicialización de Auth
       useEffect(() => {
         auth.signInAnonymously().catch(err => console.error("Error de autenticación", err));
         const unsubscribe = auth.onAuthStateChanged(setUser);
         return () => unsubscribe();
       }, []);
 
-      // 2. Hook de Persistencia de Datos
       useEffect(() => {
         if (!user) return;
 
@@ -126,7 +123,6 @@
           .collection('users').doc(user.uid)
           .collection('profile').doc('data');
         
-        // Carga Inicial
         userDocRef.get().then(docSnap => {
           if (docSnap.exists) {
             const data = docSnap.data();
@@ -139,76 +135,58 @@
                 setUsername(data.username);
                 setIsNameSet(true);
             }
-          } else {
-            userDocRef.set({ coins: 0, score: 0, tasks: [], preStudy: [false, false, false, false], itemsOwned: {} });
           }
         });
 
-        // Listener de Rankings Globales
-        const publicDataQuery = db.collection('artifacts').doc(appId)
-          .collection('public').doc('data').collection('rankings');
-        const unsubscribeRankings = publicDataQuery.onSnapshot((snapshot) => {
-          const rankings = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-          setGlobalRankings(rankings.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 5));
-        }, (err) => console.error("Error en snapshot", err));
+        const unsubscribeRankings = db.collection('artifacts').doc(appId)
+          .collection('public').doc('data').collection('rankings')
+          .orderBy('score', 'desc').limit(5)
+          .onSnapshot(snap => {
+            setGlobalRankings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          });
 
         return () => unsubscribeRankings();
       }, [user]);
 
-      // Sincronización con la nube
       const syncData = useCallback(async (updates) => {
         if (!user) return;
-        const userDocRef = db.collection('artifacts').doc(appId)
-          .collection('users').doc(user.uid)
-          .collection('profile').doc('data');
-        const rankDocRef = db.collection('artifacts').doc(appId)
-          .collection('public').doc('data')
-          .collection('rankings').doc(user.uid);
+        const userDocRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('profile').doc('data');
+        const rankDocRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rankings').doc(user.uid);
         
-        await userDocRef.update(updates).catch(() => userDocRef.set(updates, { merge: true }));
+        await userDocRef.set(updates, { merge: true });
         
-        if (updates.score !== undefined || updates.coins !== undefined || updates.username !== undefined) {
+        if (updates.score !== undefined || updates.username !== undefined) {
           await rankDocRef.set({ 
             score: updates.score ?? score, 
-            coins: updates.coins ?? coins, 
             username: updates.username ?? username,
             userId: user.uid,
             updatedAt: Date.now() 
           }, { merge: true });
         }
-      }, [user, score, coins, username]);
+      }, [user, score, username]);
 
-      // 3. Lógica del Temporizador con Nueva Lógica de XP y Créditos
       useEffect(() => {
         if (isPaused || timeLeft <= 0) return;
         const timer = setInterval(() => {
           setTimeLeft(t => {
             const nextTime = t - 1;
-            
-            // Cada 60 segundos transcurridos en modo enfoque (no descanso)
             if (!isRestMode && nextTime > 0 && nextTime % 60 === 0) {
-              // Actualización Local
-              setCoins(prevCoins => {
-                const newC = prevCoins + REWARDS.COINS_PER_MINUTE;
-                setScore(prevScore => {
-                  const newS = prevScore + REWARDS.XP_PER_MINUTE;
-                  // Sincronizar ambos valores al mismo tiempo para evitar desajustes
-                  syncData({ coins: newC, score: newS });
-                  return newS;
-                });
-                return newC;
-              });
+              const newC = coins + REWARDS.COINS_PER_MINUTE;
+              const newS = score + REWARDS.XP_PER_MINUTE;
+              setCoins(newC);
+              setScore(newS);
+              syncData({ coins: newC, score: newS });
             }
             return nextTime;
           });
         }, 1000);
         return () => clearInterval(timer);
-      }, [isPaused, isRestMode, syncData]);
+      }, [isPaused, isRestMode, coins, score, syncData]);
 
       const handleSetUsername = () => {
         if (username.trim().length >= 3) {
           setIsNameSet(true);
-          syncData({ username: username.trim() });
+          syncData({ username: username.trim(), score, coins, tasks, preStudy, itemsOwned });
         }
       };
 
@@ -218,35 +196,35 @@
         return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
       };
 
-      const handleBuy = async (item) => {
+      const handleBuy = (item) => {
         if (coins >= item.price && !itemsOwned[item.id]) {
           const newCoins = coins - item.price;
           const newItems = { ...itemsOwned, [item.id]: true };
           setCoins(newCoins);
           setItemsOwned(newItems);
-          await syncData({ coins: newCoins, itemsOwned: newItems });
+          syncData({ coins: newCoins, itemsOwned: newItems });
         }
       };
 
-      const togglePreStudy = async (index) => {
+      const togglePreStudy = (index) => {
         const nextPre = [...preStudy];
         nextPre[index] = !nextPre[index];
         setPreStudy(nextPre);
-        await syncData({ preStudy: nextPre });
+        syncData({ preStudy: nextPre });
       };
 
-      const addTask = async () => {
+      const addTask = () => {
         if (!newTask.trim()) return;
         const nextTasks = [...tasks, newTask];
         setTasks(nextTasks);
         setNewTask("");
-        await syncData({ tasks: nextTasks });
+        syncData({ tasks: nextTasks });
       };
 
-      const removeTask = async (idx) => {
+      const removeTask = (idx) => {
         const nextTasks = tasks.filter((_, i) => i !== idx);
         setTasks(nextTasks);
-        await syncData({ tasks: nextTasks });
+        syncData({ tasks: nextTasks });
       };
 
       if (!isNameSet) {
@@ -260,22 +238,8 @@
                   <p className="text-[10px] font-bold opacity-50 uppercase tracking-[0.2em]">Ingresa tu nombre para el ranking</p>
                 </div>
                 <div className="space-y-4">
-                  <input 
-                    type="text" 
-                    value={username} 
-                    onChange={(e) => setUsername(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSetUsername()}
-                    placeholder="TU USERNAME..."
-                    className="w-full bg-black/5 border-2 border-transparent focus:border-black/10 outline-none rounded-2xl px-6 py-4 text-center font-bold text-sm transition-all"
-                    maxLength={15}
-                  />
-                  <button 
-                    onClick={handleSetUsername}
-                    disabled={username.trim().length < 3}
-                    className="w-full bg-black text-white py-4 rounded-2xl font-black text-xs tracking-widest uppercase hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 disabled:pointer-events-none"
-                  >
-                    ENTRAR A LA SESIÓN
-                  </button>
+                  <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSetUsername()} placeholder="TU USERNAME..." className="w-full bg-black/5 border-2 border-transparent focus:border-black/10 outline-none rounded-2xl px-6 py-4 text-center font-bold text-sm transition-all" maxLength={15} />
+                  <button onClick={handleSetUsername} disabled={username.trim().length < 3} className="w-full bg-black text-white py-4 rounded-2xl font-black text-xs tracking-widest uppercase hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30">ENTRAR A LA SESIÓN</button>
                 </div>
              </div>
           </div>
@@ -285,31 +249,19 @@
       return (
         <div className="min-h-screen w-full bg-black text-black font-['Avenir_Next_Condensed','Arial_Narrow',sans-serif] selection:bg-black selection:text-white overflow-hidden relative">
           <img src={BACKGROUND_URL} className="fixed inset-0 w-full h-full object-cover opacity-80 z-0" alt="fondo" />
-          <div className={`fixed inset-0 z-[5] pointer-events-none transition-all duration-1000 ease-in-out ${isRestMode ? 'bg-indigo-900/30 backdrop-blur-[2px]' : 'bg-transparent'}`} />
-          
-          <div className="relative z-10 min-h-screen flex flex-col items-center p-4 md:p-8 overflow-x-hidden overflow-y-auto">
+          <div className={`fixed inset-0 z-[5] pointer-events-none transition-all duration-1000 ${isRestMode ? 'bg-indigo-900/30 backdrop-blur-[2px]' : 'bg-transparent'}`} />
+          <div className="relative z-10 min-h-screen flex flex-col items-center p-4 md:p-8 overflow-y-auto">
             <div className="w-full max-w-5xl space-y-6">
               <header className="text-center py-8">
                 <div className="mt-2 mb-4 w-full flex justify-center">
                   <img src={HEADER_BANNER_URL} className="w-full max-w-3xl rounded-[30px] shadow-2xl border border-white/20 hover:scale-[1.01] transition-transform duration-500" alt="Café Internet" />
                 </div>
-                
-                {/* Reproductor de Sonido Embed */}
-                <div className="w-full max-w-md mx-auto h-20 mb-6 overflow-hidden rounded-2xl shadow-lg border border-white/20 bg-black/10 backdrop-blur-sm relative group">
-                  <iframe 
-                    src="https://drive.google.com/file/d/1JJ6ai0TXfR5iV5gBAv_Qx3gSJQnPpnXS/preview" 
-                    width="100%" height="100%" className="border-none"
-                    style={{ 
-                      filter: isRestMode ? 'invert(1) hue-rotate(220deg) brightness(0.9)' : 'invert(1) hue-rotate(180deg) brightness(0.8)', 
-                      transform: 'scale(1.3)',
-                      pointerEvents: 'auto'
-                    }}
-                  ></iframe>
-                  <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[8px] font-black text-white uppercase tracking-widest pointer-events-none">
+                <div className="w-full max-w-md mx-auto h-20 mb-6 overflow-hidden rounded-2xl shadow-lg border border-white/20 bg-black/10 backdrop-blur-sm relative">
+                  <iframe src="https://drive.google.com/file/d/1JJ6ai0TXfR5iV5gBAv_Qx3gSJQnPpnXS/preview" width="100%" height="100%" className="border-none" style={{ filter: isRestMode ? 'invert(1) hue-rotate(220deg) brightness(0.9)' : 'invert(1) hue-rotate(180deg) brightness(0.8)', transform: 'scale(1.3)' }}></iframe>
+                  <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[8px] font-black text-white uppercase tracking-widest">
                     {isRestMode ? 'Lofi Rest' : 'Ambience Player'}
                   </div>
                 </div>
-
                 <div className="flex items-center justify-center gap-4 mt-2">
                   <p className="text-[10px] tracking-[0.5em] opacity-60 font-bold uppercase">Productivity Hub</p>
                   <div className="h-[1px] w-12 bg-black/20"></div>
@@ -317,8 +269,7 @@
                 </div>
               </header>
 
-              {/* Sección de Créditos Ganados y Estadísticas */}
-              <section className={`grid grid-cols-2 md:grid-cols-4 gap-4 transition-all duration-700`}>
+              <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
                  <div className={`p-4 rounded-[24px] border flex flex-col items-center justify-center transition-colors ${isRestMode ? 'bg-indigo-50/40 border-indigo-200' : 'bg-white/40 border-white/20 backdrop-blur-md'}`}>
                     <span className="text-[9px] font-black tracking-widest opacity-40 uppercase mb-1">Créditos Ganados</span>
                     <div className="flex items-center gap-2">
@@ -329,15 +280,15 @@
                  <div className={`p-4 rounded-[24px] border flex flex-col items-center justify-center transition-colors ${isRestMode ? 'bg-indigo-50/40 border-indigo-200' : 'bg-white/40 border-white/20 backdrop-blur-md'}`}>
                     <span className="text-[9px] font-black tracking-widest opacity-40 uppercase mb-1">Experiencia (XP)</span>
                     <span className="text-xl font-black">{score} XP</span>
-                 </div>
+                </div>
                  <div className={`p-4 rounded-[24px] border flex flex-col items-center justify-center transition-colors ${isRestMode ? 'bg-indigo-50/40 border-indigo-200' : 'bg-white/40 border-white/20 backdrop-blur-md'}`}>
                     <span className="text-[9px] font-black tracking-widest opacity-40 uppercase mb-1">Items Obtenidos</span>
                     <span className="text-xl font-black">{Object.keys(itemsOwned).length}</span>
-                 </div>
+                </div>
                  <div className={`p-4 rounded-[24px] border flex flex-col items-center justify-center transition-colors ${isRestMode ? 'bg-indigo-50/40 border-indigo-200' : 'bg-white/40 border-white/20 backdrop-blur-md'}`}>
                     <span className="text-[9px] font-black tracking-widest opacity-40 uppercase mb-1">Tareas Hechas</span>
                     <span className="text-xl font-black">{tasks.length}</span>
-                 </div>
+                </div>
               </section>
 
               <section className={`rounded-[40px] border border-white/30 p-8 md:p-16 text-center shadow-2xl transition-all duration-700 hover:bg-white/60 ${isRestMode ? 'bg-white/30' : 'bg-white/50 backdrop-blur-xl'}`}>
@@ -372,17 +323,16 @@
                 <section className={`rounded-[32px] p-8 border flex flex-col transition-colors duration-700 ${isRestMode ? 'bg-indigo-50/30 border-indigo-100' : 'bg-white/40 border-white/20 backdrop-blur-md'}`}>
                   <h3 className="text-[10px] font-black tracking-widest opacity-40 mb-6 uppercase">Objetivos de la Sesión</h3>
                   <div className="flex gap-2 mb-6">
-                    <input value={newTask} onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTask()} className="bg-white/50 flex-1 rounded-2xl px-5 py-4 text-xs font-bold outline-none border-2 border-transparent focus:border-black/20 transition-all placeholder:text-black/30" placeholder="AÑADIR TAREA..." />
+                    <input value={newTask} onChange={e => setNewTask(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTask()} className="bg-white/50 flex-1 rounded-2xl px-5 py-4 text-xs font-bold outline-none border-2 border-transparent focus:border-black/20 placeholder:text-black/30" placeholder="AÑADIR TAREA..." />
                     <button onClick={addTask} className={`w-14 rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg text-white ${isRestMode ? 'bg-indigo-900' : 'bg-black'}`}>
                       <LucideIcon name="plus" />
                     </button>
                   </div>
                   <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                    {tasks.length === 0 && <p className="text-[10px] opacity-30 italic text-center py-4 uppercase">No hay tareas pendientes</p>}
                     {tasks.map((t, i) => (
                       <div key={i} className="group flex items-center justify-between p-4 bg-white/30 rounded-2xl border border-white/20 hover:bg-white/50 transition-all">
                         <span className="text-[11px] font-bold uppercase tracking-tight">{t}</span>
-                        <button onClick={() => removeTask(i)} className="opacity-0 group-hover:opacity-100 p-2 hover:text-red-500 transition-all">
+                        <button onClick={() => removeTask(i)} className="opacity-0 group-hover:opacity-100 p-2 hover:text-red-500">
                           <LucideIcon name="trash" size={14} />
                         </button>
                       </div>
@@ -391,7 +341,6 @@
                 </section>
               </div>
 
-              {/* Ranking Global */}
               <section className={`rounded-3xl p-6 border transition-colors duration-700 ${isRestMode ? 'bg-indigo-50/20 border-indigo-100' : 'bg-white/30 border-white/20 backdrop-blur-xl'}`}>
                  <h3 className="text-[10px] font-black tracking-widest opacity-40 mb-4 text-center uppercase">Global Live Rankings (by XP)</h3>
                  <div className="flex flex-wrap justify-center gap-4">
@@ -405,7 +354,6 @@
                  </div>
               </section>
 
-              {/* Tienda con precios visibles */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-20">
                 <div className={`p-6 rounded-[32px] border transition-colors duration-700 ${isRestMode ? 'bg-indigo-50/30 border-indigo-100' : 'bg-white/40 border-white/20 backdrop-blur-md'}`}>
                   <div className="flex justify-between items-center mb-4">
@@ -414,11 +362,7 @@
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     {SHOP_ITEMS.map(item => (
-                      <button 
-                        key={item.id} 
-                        onClick={() => handleBuy(item)} 
-                        className={`relative p-2 rounded-2xl flex flex-col items-center justify-center transition-all ${itemsOwned[item.id] ? 'bg-black/5 opacity-20 grayscale cursor-not-allowed' : 'bg-white/40 hover:bg-white hover:scale-105 shadow-sm active:scale-95'}`}
-                      >
+                      <button key={item.id} onClick={() => handleBuy(item)} className={`relative p-2 rounded-2xl flex flex-col items-center justify-center transition-all ${itemsOwned[item.id] ? 'bg-black/5 opacity-20 grayscale cursor-not-allowed' : 'bg-white/40 hover:bg-white hover:scale-105 shadow-sm active:scale-95'}`}>
                         <span className="text-2xl mb-1">{item.icon}</span>
                         <span className="text-[8px] font-black opacity-60 tracking-tight">${item.price}</span>
                       </button>
